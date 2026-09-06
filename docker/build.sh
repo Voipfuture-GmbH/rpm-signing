@@ -19,6 +19,10 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 
+if [[ "$PREFIX" != */ ]] ; then
+  PREFIX="$PREFIX/"
+fi
+
 set -e -o pipefail
 
 . ../common.sh
