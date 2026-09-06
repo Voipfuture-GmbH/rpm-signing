@@ -6,7 +6,7 @@ function printHelp() {
 }
 
 DO_PUSH=0
-PREFIX=""
+PREFIX="local.invalid/"
 while [ "$#" -gt 0 ]; do
   if [ "$1" == "-h" -o "$1" == "--help" -o "$1" == "-help" ] ; then
     printHelp
@@ -33,6 +33,8 @@ echo "Building $FINAL_NAME"
     --build-arg APP_VERSION="${APP_VERSION}" \
     --build-arg GIT_REF="${GIT_REF}" \
     -t ${FINAL_NAME} . )
+
+docker tag ${FINAL_NAME} $IMAGE_NAME:latest
 
 if [ "$DO_PUSH" != "0" ] ; then
   docker-push.sh $PREFIX
