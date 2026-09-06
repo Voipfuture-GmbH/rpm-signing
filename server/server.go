@@ -181,13 +181,15 @@ func loadAppConfigFromReader(reader io.ReadCloser) (AppConfig, error) {
 	if len(result.ListenAddress) == 0 {
 		result.ListenAddress = defaultListenAddress
 	}
-	_, err = result.LoadGpgPrivateKey()
-	if err != nil {
-		return AppConfig{}, fmt.Errorf("failed to load GPG private key %s: %w", result.GpgPrivateKeyPath, err)
-	}
+
 	_, err = result.LoadGpgPublicKey()
 	if err != nil {
 		return AppConfig{}, fmt.Errorf("failed to load GPG public key %s: %w", result.GpgPublicKeyPath, err)
+	}
+
+	_, err = result.LoadGpgPrivateKey()
+	if err != nil {
+		return AppConfig{}, fmt.Errorf("failed to load GPG private key %s: %w", result.GpgPrivateKeyPath, err)
 	}
 
 	return result, nil
