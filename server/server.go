@@ -77,8 +77,11 @@ func stringToBoolean(s string) (bool, error) {
 }
 
 func assertFileExists(filename string) (string, error) {
-	_, err := os.Stat(filename)
-	if os.IsNotExist(err) {
+	exists, err := common.FileExists(filename)
+	if err != nil {
+		return "", err
+	}
+	if !exists {
 		return "", fmt.Errorf("file '%s' does not exist", filename)
 	}
 	return filename, nil
@@ -252,7 +255,7 @@ func signRpmData(reader common.ReaderWithOffset, writer common.WriterWithOffset,
 	if err != nil {
 		return err
 	}
-	err = common.SignRpmAndWrite(rpmFile, writer, reader, privateKey, false)
+	err = common.SignRpmAndWrite(rpmFile, writer, reader, privateKey)
 	if err != nil {
 		return err
 	}
@@ -284,13 +287,45 @@ func handlePublicKey(w http.ResponseWriter, appConfig AppConfig) {
 	}
 }
 
+func doSigDetached(input io.Reader, appConfig AppConfig) ([]byte, error) {
+	privateKey, err := appConfig.LoadGpgPrivateKey()
+	if err != nil {
+		return nil, err
+	}
+
+	signature, err := common.SignGeneric(input, &privateKey)
+	if err != nil {
+		return nil, err
+	}
+	return signature, nil
+}
+
 // handleSignRpmHeader receives arbitrary data and
 // returns an ASCII-armoreed GPG detached signature
 // of that data (suitable for signing RPM
 // repository metadata for example)
 func handleSignDetached(w http.ResponseWriter, r *http.Request, appConfig AppConfig) {
-	// FIXME: Implement me
-	panic("not implemented")
+
+	// constant-time comparison because the token is a shared secret
+	token := r.URL.Query().Get("authToken")
+	if subtle.ConstantTimeCompare([]byte(token), []byte(appConfig.ApiSigningToken)) != 1 {
+		common.RootLogger().Errorf("Rejected /sign request from %s: missing or wrong authToken", r.RemoteAddr)
+		http.Error(w, "missing or invalid authToken", http.StatusForbidden)
+		return
+	}
+
+	signature, err := doSigDetached(r.Body, appConfig)
+	if err != nil {
+		common.RootLogger().Errorf("Failed to sign incoming generic data from %s: %v", r.RemoteAddr, err)
+		http.Error(w, "failed to sign data", http.StatusBadRequest)
+		return
+	}
+
+	initBinaryUncacheableHttpResponse(w)
+	if _, err = w.Write(signature); err != nil {
+		// too late for an error status, the response body is already being written
+		common.RootLogger().Errorf("Failed to write signed RPM data to %s: %v", r.RemoteAddr, err)
+	}
 }
 
 // handleSign serves POST /sign and returns the request body signed with the application's GPG private key
@@ -407,6 +442,9 @@ func main() {
 			os.Exit(0)
 		}
 	}
+
+	common.RootLogger().SetCurrentLogLevel(common.LOG_LEVEL_INFO)
+	common.RootLogger().Infof("Server started at %s, version: %s\n", time.Now(), common.VersionString())
 
 	var err error
 	appConfig, err := loadAppConfig(os.Args[1:])

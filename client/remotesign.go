@@ -64,9 +64,7 @@ func createSigningUrl(serverBaseUrl string, authToken string) (string, error) {
 	if len(parsed.Host) == 0 {
 		return "", fmt.Errorf("not a valid sign server URL '%s': missing host", serverBaseUrl)
 	}
-	if len(parsed.Path) == 0 {
-		parsed.Path = strings.TrimSuffix(parsed.Path, "/") + common.SignRpmHeader
-	}
+	parsed.Path = strings.TrimSuffix(parsed.Path, "/") + common.SignRpmHeader
 	parsed.RawQuery = url.Values{"authToken": {authToken}}.Encode()
 	return parsed.String(), nil
 }

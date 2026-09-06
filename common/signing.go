@@ -380,7 +380,7 @@ func SignRpmAndWriteToFile(rpmFile RpmFile,
 		return err
 	}
 	writer := NewFileWriterWithOffset(destinationFile)
-	err = SignRpmAndWrite(rpmFile, writer, payloadReader, privateKey, verboseOutput)
+	err = SignRpmAndWrite(rpmFile, writer, payloadReader, privateKey)
 	if err != nil {
 		_ = os.Remove(destinationFileName)
 		_ = CloseWriter(writer)
@@ -389,24 +389,18 @@ func SignRpmAndWriteToFile(rpmFile RpmFile,
 	return CloseWriter(writer)
 }
 
-func SignRpmAndWrite(rpmFile RpmFile,
-	writer WriterWithOffset,
-	payloadReader ReaderWithOffset,
-	privateKey packet.PrivateKey,
-	verboseOutput bool) error {
+func SignRpmAndWrite(rpmFile RpmFile, writer WriterWithOffset, payloadReader ReaderWithOffset, privateKey packet.PrivateKey) error {
 
 	var err error
 
-	err = SignRpm(&rpmFile, privateKey, verboseOutput)
+	err = SignRpm(&rpmFile, privateKey)
 	if err != nil {
 		return err
 	}
 	return rpmFile.Write(writer, payloadReader)
 }
 
-func SignRpm(rpmFile *RpmFile,
-	privateKey packet.PrivateKey,
-	verboseOutput bool) error {
+func SignRpm(rpmFile *RpmFile, privateKey packet.PrivateKey) error {
 
 	var err error
 
@@ -430,7 +424,7 @@ func SignRpm(rpmFile *RpmFile,
 		newEntryTag = SigTagDSAHeader
 		rpmFile.SignatureHeader.DeleteIndexEntryIfExists(SigTagRSAHeader)
 	default:
-		// FIXME: Add support for PQC keys etc. ?
+		// FIXME: Implement RPM V6 support
 		return fmt.Errorf("sorry, only private keys of type RSA or DSA are supported for signing")
 	}
 

@@ -60,7 +60,7 @@ func TestSignRpm(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to load private key - %v", err)
 	}
-	if err = SignRpm(&rpmFile, privateKey, true); err != nil {
+	if err = SignRpm(&rpmFile, privateKey); err != nil {
 		CloseQuietly(payloadReader)
 		t.Fatalf("Failed to sign %v - %v", fileName, err)
 	}
@@ -103,7 +103,7 @@ func signTestRpm(privateKeyFile string, t *testing.T) RpmFile {
 	if err != nil {
 		t.Fatalf("Failed to load private key %s - %v", privateKeyFile, err)
 	}
-	if err = SignRpm(&rpmFile, privateKey, false); err != nil {
+	if err = SignRpm(&rpmFile, privateKey); err != nil {
 		t.Fatalf("Failed to sign with %s - %v", privateKeyFile, err)
 	}
 	assertHeaderConsistent(&rpmFile.SignatureHeader, "signed with "+privateKeyFile, t)
@@ -196,7 +196,7 @@ func TestSignRpmReplacesTagOfOtherKeyType(t *testing.T) {
 				if err != nil {
 					t.Fatalf("Failed to load private key %s - %v", keyFile, err)
 				}
-				if err = SignRpm(&rpmFile, privateKey, false); err != nil {
+				if err = SignRpm(&rpmFile, privateKey); err != nil {
 					t.Fatalf("Failed to sign with %s - %v", keyFile, err)
 				}
 				assertHeaderConsistent(&rpmFile.SignatureHeader, testCase.label, t)

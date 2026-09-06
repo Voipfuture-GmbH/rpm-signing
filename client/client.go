@@ -6,8 +6,6 @@ import (
 	"os"
 	"rpm-signing/common"
 	"strings"
-
-	"github.com/ProtonMail/go-crypto/openpgp"
 )
 
 func printHelpAndExit(errorMessage ...string) {
@@ -17,9 +15,10 @@ func printHelpAndExit(errorMessage ...string) {
 		fmt.Println()
 	}
 
-	fmt.Printf("Usage: [--version] [-v|--verbose] [--dump|--dump-main-hdr|--dump-sig-hdr] [-i|--info] [--verify] [-d|--debug] [-s|--sign] [-f|--overwrite] " +
+	fmt.Printf("Usage: [--version] [-v|--verbose] [--dump|--dump-main-hdr|--dump-sig-hdr] [-i|--info] [--verify] [-d|--debug] " +
+		"[-s|--sign] [--sign-generic] [--sign-server <sign server base URL>] [--sign-server-token <token>] [-f|--overwrite] " +
 		"[--priv-key <GPG private key file>] [--priv-key-password <password>] [--pub-key <GPG public key file OR directory>] " +
-		"[--sign-server <sign server base URL>] [--sign-server-token <token>] [-o|--output-file <RPM FILE>] <RPM file>")
+		"[-o|--output-file <RPM FILE>] <RPM file>")
 	fmt.Println()
 	os.Exit(1)
 }
@@ -35,6 +34,14 @@ func printErrorAndExit(errorMessage string) {
 	_, _ = fmt.Fprintf(os.Stderr, "Error: %s\n", errorMessage)
 	os.Exit(1)
 }
+
+type SigningMode uint8
+
+var (
+	SIGNING_MODE_NOT_SET SigningMode = 0
+	SIGNING_MODE_RPM     SigningMode = 1
+	SIGNING_MODE_GENERIC SigningMode = 2
+)
 
 func main() {
 
@@ -56,7 +63,7 @@ func main() {
 	var dumpSignatureHeader = false
 	var dumpMainHeader = false
 	var verboseOutput = false
-	var signRpm = false
+	var signingMode SigningMode = SIGNING_MODE_NOT_SET
 
 	seenOpts := common.NewSet[string]()
 	failIfNotUnique := func(opt string) {
@@ -147,7 +154,10 @@ func main() {
 			verifySignatures = true
 		} else if arg == "-s" || arg == "--sign" {
 			failIfNotUnique(arg)
-			signRpm = true
+			signingMode = SIGNING_MODE_RPM
+		} else if arg == "--sign-generic" {
+			failIfNotUnique(arg)
+			signingMode = SIGNING_MODE_GENERIC
 		} else if arg == "-d" || arg == "--debug" {
 			failIfNotUnique(arg)
 			common.RootLogger().SetCurrentLogLevel(common.LOG_LEVEL_DEBUG)
@@ -156,18 +166,30 @@ func main() {
 		}
 	}
 
+	/*
+	 * Commandline arguments sanity checking
+	 */
 	if len(remainingArgs) == 0 {
 		printHelpAndExit("No RPM file name given")
 	} else if len(remainingArgs) > 1 {
 		printHelpAndExit("Expected exactly one RPM file name but got " + strings.Join(remainingArgs, ", "))
 	}
 
+	if signingMode == SIGNING_MODE_GENERIC {
+		if len(privateKeyFilename) == 0 {
+			printHelpAndExit("--sign-generic option requires --priv-key")
+		}
+		if len(destinationFileName) == 0 {
+			printHelpAndExit("--sign-generic option requires -o/--output-file")
+		}
+	}
+
 	if seenOpts.Contains("--sign-server-token") && len(signServerUrl) == 0 {
 		printHelpAndExit("--sign-server-token requires --sign-server")
 	}
 	if len(signServerUrl) > 0 {
-		if !signRpm {
-			printHelpAndExit("--sign-server can only be used together with -s/--sign")
+		if signingMode == SIGNING_MODE_NOT_SET {
+			printHelpAndExit("--sign-server can only be used together with -s/--sign or --sign-generic")
 		}
 		if len(privateKeyFilename) > 0 || privateKeyPassphrase != nil {
 			printHelpAndExit("--sign-server is mutually exclusive with --priv-key/--priv-key-password")
@@ -177,19 +199,40 @@ func main() {
 	rpmFilePath := remainingArgs[0]
 
 	if verboseOutput {
-		common.RootLogger().Infof("Reading file %s\n", rpmFilePath)
+		common.RootLogger().Infof("Reading input file %s\n", rpmFilePath)
 	}
 
 	r, err := common.OpenFileOrUrl(rpmFilePath)
 	if err != nil {
-		printErrorAndExit(fmt.Sprintf("Failed read RPM file from %s. Error: %s", rpmFilePath, err))
+		printErrorAndExit(fmt.Sprintf("Failed reading file %s. Error: %v", rpmFilePath, err))
 	}
 
-	// when signing remotely, the RPM header is the POST body, so capture it
-	// while the parser below reads it anyway
+	if signingMode == SIGNING_MODE_GENERIC {
+
+		privateKey, err := common.LoadPrivateKeyFromFile(privateKeyFilename, privateKeyPassphrase)
+		if err != nil {
+			printHelpAndExit(fmt.Sprintf("Failed to load private key from %s: %v", privateKeyFilename, err))
+		}
+
+		detachedSignature, err := common.SignGeneric(r, &privateKey)
+		if err != nil {
+			printHelpAndExit(fmt.Sprintf("Signing operation failed: %v", err))
+		}
+
+		if err := common.WriteFileAtomically(destinationFileName, detachedSignature, 0644, overwriteDestinationFile); err != nil {
+			printErrorAndExit(fmt.Sprintf("Failed to write detached GPG signature to %s: %v", destinationFileName, err))
+		}
+		if verboseOutput {
+			common.RootLogger().Infof("Wrote detached GPG signature to %s", destinationFileName)
+		}
+		os.Exit(0)
+	}
+
+	// when signing RPMs remotely, the RPM header is the POST body,
+	// so capture it while the RPM parser below reads it anyway
 	var headerCapture *headerCapturingReader
 	var rpmSource io.Reader = r
-	if len(signServerUrl) > 0 {
+	if len(signServerUrl) > 0 && signingMode == SIGNING_MODE_RPM {
 		headerCapture = newHeaderCapturingReader(r)
 		rpmSource = headerCapture
 	}
@@ -249,28 +292,9 @@ func main() {
 		}
 
 		// load public keys
-		var gpgPublicKeys openpgp.EntityList
-		for _, file := range gpgPublicFiles {
-
-			isDir, err := common.IsDirectory(file)
-			if err != nil {
-				printErrorAndExit(fmt.Sprintf("Failed to load GPG public key from %s. Error: %s", gpgPublicFiles, err))
-			}
-
-			var additionalPublicKeys openpgp.EntityList
-			if isDir {
-				fileNames, err := common.ListMatchingFiles([]string{file}, ".*")
-				if err != nil {
-					printErrorAndExit(fmt.Sprintf("Failed to load GPG public key from %s. Error: %s", gpgPublicFiles, err))
-				}
-				additionalPublicKeys, err = common.LoadPublicKeys(fileNames)
-				if err != nil {
-					printErrorAndExit(fmt.Sprintf("Failed to load GPG public key from %s. Error: %s", fileNames, err))
-				}
-			} else if additionalPublicKeys, err = common.LoadPublicKeys([]string{file}); err != nil {
-				printErrorAndExit(fmt.Sprintf("Failed to load GPG public key from %s. Error: %s", gpgPublicFiles, err))
-			}
-			gpgPublicKeys = append(gpgPublicKeys, additionalPublicKeys...)
+		gpgPublicKeys, err := common.LoadPublicKeys(gpgPublicFiles)
+		if err != nil {
+			printErrorAndExit("Error loading GPG public keys, error: " + err.Error())
 		}
 
 		// payload reader is only required for V3 signatures
@@ -286,13 +310,9 @@ func main() {
 			}
 			defer common.CloseQuietly(payloadReader)
 
-			var cnt int64
-			cnt, err = payloadReader.Seek(int64(rpmFile.PayloadStartOffset), 0)
+			err = payloadReader.SeekRelativeToStart(int64(rpmFile.PayloadStartOffset))
 			if err != nil {
 				printErrorAndExit(fmt.Sprintf("Failed to seek() RPM file %s. Error: %s", rpmFilePath, err.Error()))
-			}
-			if cnt != int64(rpmFile.PayloadStartOffset) {
-				printErrorAndExit(fmt.Sprintf("Failed to seek() RPM file %s , file truncated ? Expected %d bytes, got %d", rpmFilePath, rpmFile.PayloadStartOffset, cnt))
 			}
 		}
 
@@ -325,14 +345,14 @@ func main() {
 		common.RootLogger().Info("RPM file is unsigned, no signatures to verify")
 	}
 
-	if signRpm {
+	if signingMode == SIGNING_MODE_RPM {
 
 		if len(destinationFileName) <= 0 {
 			printHelpAndExit(fmt.Sprintf("Cannot sign RPM without -o/--output-file"))
 		}
 
 		if headerCapture != nil {
-
+			// sign using remote server
 			if verboseOutput {
 				common.RootLogger().Infof("Sending %d bytes of RPM header to sign server %s", len(headerCapture.Bytes()), signServerUrl)
 			}
@@ -342,7 +362,7 @@ func main() {
 				printErrorAndExit(fmt.Sprintf("Failed to sign RPM file %s. Error: %v", destinationFileName, err))
 			}
 		} else {
-
+			// local signing
 			if len(privateKeyFilename) == 0 {
 				printHelpAndExit("Cannot --sign without --priv-key")
 			}

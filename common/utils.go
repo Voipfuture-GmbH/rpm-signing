@@ -115,9 +115,14 @@ func GrowSliceIfNecessary[S ~[]E, E any](index uint32, arrayToGrow *S) {
 	}
 }
 
+// SeekableReader combines ReaderWithOffset with a function
+// to see to an offset relative to the start of the input stream.
+// Depending on the actual implementation it may not be possible
+// to seek back all the way to the very beginning of the input stream
+// but only a limited distance.
 type SeekableReader interface {
 	ReaderWithOffset
-	Seek(offset int64, whence int) (ret int64, err error)
+	SeekRelativeToStart(offset int64) (err error)
 }
 
 type SeekableReaderImpl struct {
@@ -138,25 +143,29 @@ func (s *SeekableReaderImpl) Offset() uint64 {
 	return s.reader.Offset()
 }
 
-func (s *SeekableReaderImpl) Seek(offset int64, whence int) (ret int64, err error) {
+func (s *SeekableReaderImpl) SeekRelativeToStart(offset int64) (err error) {
 
 	if readerWithOffset, ok := s.reader.(*IOReaderWithOffset); ok {
 		wrappedReader := readerWithOffset.file
 		if fileReader, ok := wrappedReader.(*os.File); ok {
-			return fileReader.Seek(offset, whence)
+			newOffset, err := fileReader.Seek(offset, 0)
+			if err != nil {
+				return fmt.Errorf("seek to offset %d failed: %w", offset, err)
+			}
+			if newOffset != offset {
+				return fmt.Errorf("seek to offset %d failed, only reached %d", offset, newOffset)
+			}
+			return err
 		}
 	}
 	if offset < 0 {
-		return 0, errors.New("seek() with negative offset only supported for files")
-	}
-	if whence != 0 {
-		return 0, fmt.Errorf("seek() with mode %d not supported for arbitrary readers", whence)
+		return errors.New("seek() with negative offset only supported for files")
 	}
 	if s.reader.Offset() != 0 {
-		return 0, errors.New("seek() with from beginning of stream only supported if stream is still at offset 0")
+		return errors.New("seek() with from beginning of stream only supported if stream is still at offset 0")
 	}
 	buf := make([]byte, offset)
-	return offset, FillBuffer(buf, s.reader)
+	return FillBuffer(buf, s.reader)
 }
 
 func NewSeekableReader(reader ReaderWithOffset) SeekableReader {
@@ -333,4 +342,64 @@ func ReadLines(r io.Reader) ([]string, error) {
 	}
 
 	return lines, nil
+}
+
+func FileExists(path string) (bool, error) {
+	_, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+func WriteFileAtomically(filename string, data []byte, perm os.FileMode, overwrite bool) error {
+
+	var err error
+	destinationExists, err := FileExists(filename)
+	if err != nil {
+		return err
+	}
+	if destinationExists && !overwrite {
+		return fmt.Errorf("destination file %s already exists and overwriting not enabled", filename)
+	}
+
+	dir := filepath.Dir(filename)
+
+	tmpFile, err := os.CreateTemp(dir, ".tmp-*")
+	if err != nil {
+		return fmt.Errorf("failed to create temp file: %w", err)
+	}
+
+	// scheduled cleanup on failure
+	defer func() {
+		if err != nil {
+			CloseQuietly(tmpFile)
+			_ = os.Remove(tmpFile.Name())
+		}
+	}()
+
+	if _, err = tmpFile.Write(data); err != nil {
+		return fmt.Errorf("failed to write to temp file: %w", err)
+	}
+
+	if err = tmpFile.Chmod(perm); err != nil {
+		return fmt.Errorf("failed to set permissions: %w", err)
+	}
+
+	if err = tmpFile.Sync(); err != nil {
+		return fmt.Errorf("failed to sync temp file: %w", err)
+	}
+
+	if err = tmpFile.Close(); err != nil {
+		return fmt.Errorf("failed to close temp file: %w", err)
+	}
+
+	if err = os.Rename(tmpFile.Name(), filename); err != nil {
+		return fmt.Errorf("failed to replace target file: %w", err)
+	}
+
+	return nil
 }

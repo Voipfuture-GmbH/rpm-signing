@@ -19,12 +19,13 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 
-set -x -e -o pipefail
+set -e -o pipefail
 
 . ../common.sh
 
 IMAGE_NAME="$PREFIX${IMAGE_NAME}"
 FINAL_NAME="${IMAGE_NAME}:${IMAGE_VERSION}"
+
 GIT_REF=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
 
 echo "Building $FINAL_NAME"
@@ -36,3 +37,5 @@ echo "Building $FINAL_NAME"
 if [ "$DO_PUSH" != "0" ] ; then
   docker-push.sh $PREFIX
 fi
+
+echo "Created image ${FINAL_NAME}"

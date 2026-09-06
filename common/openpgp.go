@@ -2,13 +2,13 @@ package common
 
 import (
 	"bytes"
-	"crypto"
 	_ "crypto/sha256" // Registers SHA-256 with the crypto package
 	"errors"
 	"fmt"
 	"hash"
 	"io"
 	"os"
+	"time"
 
 	"github.com/ProtonMail/go-crypto/openpgp"
 	"github.com/ProtonMail/go-crypto/openpgp/armor"
@@ -99,7 +99,7 @@ func LoadPrivateKey(file SeekableReader, passphrase []byte) (packet.PrivateKey, 
 		packetReader = armorBlock.Body
 	} else {
 		// Not armored or failed decode; seek back to start and read as raw binary packets
-		if _, err := file.Seek(0, io.SeekStart); err != nil {
+		if err := file.SeekRelativeToStart(0); err != nil {
 			return packet.PrivateKey{}, fmt.Errorf("failed to seek key file: %w", err)
 		}
 		packetReader = file
@@ -208,16 +208,13 @@ func SignDigest(digest hash.Hash, privKey *packet.PrivateKey) ([]byte, error) {
 	*/
 
 	// 1. Construct the Version 4 OpenPGP Signature Packet metadata
-	sig := &packet.Signature{
-		Version:    4,
-		SigType:    packet.SigTypeBinary,
-		PubKeyAlgo: privKey.PubKeyAlgo, // has to match the key, it selects the signing algorithm
-		Hash:       crypto.SHA256,      // Modern RPM expects SHA-256
-		// DSA truncates the digest to its subgroup size, so SHA-256 is signed
-		// in full by a key with a 256 bit q and truncated by a smaller one
-		CreationTime: privKey.CreationTime,
-		IssuerKeyId:  &privKey.KeyId,
+
+	config := &packet.Config{
+		Time: time.Now,
 	}
+
+	// 3. Create the Signature packet explicitly
+	sig := CreateSignaturePacket(privKey, config)
 
 	// 3. Sign the populated hash instance
 	err := sig.Sign(digest, privKey, nil)
@@ -233,4 +230,71 @@ func SignDigest(digest hash.Hash, privKey *packet.PrivateKey) ([]byte, error) {
 	}
 
 	return buf.Bytes(), nil
+}
+
+func CreateSignaturePacket(privKey *packet.PrivateKey, config *packet.Config) *packet.Signature {
+
+	// 3. Create the Signature packet explicitly
+	sig := &packet.Signature{
+		Version:      privKey.PublicKey.Version,
+		SigType:      packet.SigTypeBinary,
+		PubKeyAlgo:   privKey.PubKeyAlgo,
+		Hash:         config.Hash(),
+		CreationTime: config.Now(),
+		IssuerKeyId:  &privKey.PublicKey.KeyId,
+	}
+	return sig
+}
+
+// SignGeneric signs all the input data and returns an ASCII-armored, detached GPG signature
+func SignGeneric(dataToSign io.Reader, privKey *packet.PrivateKey) ([]byte, error) {
+
+	sigFile := NewArrayWriter()
+
+	// 2. Wrap output in ASCII armor
+	armorWriter, err := armor.Encode(&sigFile, openpgp.SignatureType, nil)
+	if err != nil {
+		_ = CloseWriter(armorWriter)
+		return nil, fmt.Errorf("failed to create armor encoder: %w", err)
+	}
+
+	config := &packet.Config{
+		Time: time.Now,
+	}
+
+	// 3. Create the Signature packet explicitly
+	sig := CreateSignaturePacket(privKey, config)
+
+	// 4. Prepare the hash context using the signature packet
+	// This ensures PGP-specific headers are hashed properly
+	hasher, err := sig.PrepareSign(config)
+	if err != nil {
+		_ = CloseWriter(armorWriter)
+		return nil, fmt.Errorf("failed to prepare signature: %w", err)
+	}
+
+	// 5. Stream the target file through the hasher
+	if _, err := io.Copy(hasher, dataToSign); err != nil {
+		_ = CloseWriter(armorWriter)
+		return nil, fmt.Errorf("failed to hash input data: %w", err)
+	}
+
+	// 6. Complete the signature (adds the PGP trailer and performs RSA/ECC crypto)
+	if err := sig.Sign(hasher, privKey, config); err != nil {
+		_ = CloseWriter(armorWriter)
+		return nil, fmt.Errorf("crypto signing failed: %w", err)
+	}
+
+	// 7. Serialize the signed packet into the armor stream
+	if err := sig.Serialize(armorWriter); err != nil {
+		_ = CloseWriter(armorWriter)
+		return nil, fmt.Errorf("failed to serialize signature: %w", err)
+	}
+
+	// Close the armor writer to write the closing ASCII footer
+	if err = armorWriter.Close(); err != nil {
+		return nil, fmt.Errorf("failed to close armor writer: %w", err)
+	}
+
+	return sigFile.Data, nil
 }

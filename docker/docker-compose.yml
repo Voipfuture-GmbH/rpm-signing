@@ -24,7 +24,7 @@
 
 services:
   rpm-signing-server:
-    image: rpm-signing-server:latest
+    image: rpm-signing:latest
     build:
       # The context is the project root because the Dockerfile copies go.mod and
       # the source packages from there.
@@ -40,7 +40,7 @@ services:
     # No command needed: the image entrypoint already passes
     # -c /config/rpm-signing.properties.
     volumes:
-      - ./config:/config:ro
+      - ./example-config:/config:ro
     ports:
       - "8080:8080"
     restart: unless-stopped
