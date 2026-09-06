@@ -121,6 +121,7 @@ func GrowSliceIfNecessary[S ~[]E, E any](index uint32, arrayToGrow *S) {
 // to seek back all the way to the very beginning of the input stream
 // but only a limited distance.
 type SeekableReader interface {
+	DelegatingReader
 	ReaderWithOffset
 	SeekRelativeToStart(offset int64) (err error)
 }
@@ -130,6 +131,10 @@ type SeekableReaderImpl struct {
 }
 
 var _ SeekableReader = (*SeekableReaderImpl)(nil)
+
+func (s *SeekableReaderImpl) GetDelegate() io.Reader {
+	return s.reader
+}
 
 func (s *SeekableReaderImpl) Close() error {
 	return s.reader.Close()
@@ -147,6 +152,13 @@ func (s *SeekableReaderImpl) SeekRelativeToStart(offset int64) (err error) {
 
 	if readerWithOffset, ok := s.reader.(*IOReaderWithOffset); ok {
 		wrappedReader := readerWithOffset.file
+		for {
+			unwrapped, ok := wrappedReader.(DelegatingReader)
+			if !ok {
+				break
+			}
+			wrappedReader = unwrapped.GetDelegate()
+		}
 		if fileReader, ok := wrappedReader.(*os.File); ok {
 			newOffset, err := fileReader.Seek(offset, 0)
 			if err != nil {

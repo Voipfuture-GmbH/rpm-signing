@@ -36,6 +36,11 @@ type WriterWithOffset interface {
 	OffsetProvider
 }
 
+type DelegatingReader interface {
+	io.Reader
+	GetDelegate() io.Reader
+}
+
 // ReaderWithOffset is an io.Reader that tracks the
 // current read offset
 type ReaderWithOffset interface {
@@ -45,6 +50,7 @@ type ReaderWithOffset interface {
 }
 
 type DigestReader interface {
+	DelegatingReader
 	ReaderWithOffset
 	GetDigest() []byte
 }
@@ -87,6 +93,10 @@ type DigestReaderImpl struct {
 var _ DigestReader = (*DigestReaderImpl)(nil)
 var _ ReaderWithOffset = (*DigestReaderImpl)(nil)
 var _ WriterWithOffset = (*offsetTrackingWriter)(nil)
+
+func (d *DigestReaderImpl) GetDelegate() io.Reader {
+	return d.source
+}
 
 func (d *DigestReaderImpl) Close() error {
 	return d.source.Close()

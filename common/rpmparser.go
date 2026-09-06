@@ -1304,6 +1304,10 @@ func NewIOReaderWithOffset(file io.Reader) ReaderWithOffset {
 	}
 }
 
+func (r *IOReaderWithOffset) GetDelegate() io.Reader {
+	return r.file
+}
+
 func (r *IOReaderWithOffset) Close() error {
 	return Close(r.file)
 }
