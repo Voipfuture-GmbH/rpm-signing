@@ -389,7 +389,8 @@ var serverStartTime = time.Now()
 func handleVersionRequest(w http.ResponseWriter, r *http.Request, appConfig AppConfig) {
 
 	serverStart := serverStartTime.Format(time.RFC3339)
-	json := `{ application: "rpm-signing", serverStart: "` + serverStart + `", version:"` + common.AppVersion + `", gitRef: "` + common.GitRef + `"}`
+	json := `{ "application": "rpm-signing", 
+"serverStart": "` + serverStart + `", "version":"` + common.AppVersion + `", "gitRef": "` + common.GitRef + `"}`
 
 	initBinaryUncacheableHttpResponse(w)
 	w.Header().Set("Content-Type", "application/json")
