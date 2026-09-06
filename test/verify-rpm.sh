@@ -43,5 +43,8 @@ rpmdb --dbpath "$TMP_DIR" --initdb
 echo "==> Importing public key into temporary RPM database..."
 rpm --dbpath "$TMP_DIR" --import "$TMP_DIR/signing_key.pub"
 
-echo -e "==> Verifying signature for $RPM_FILE:\n"
+echo -e "==> Verifying signature for $RPM_FILE using rpm -Kv ... :\n"
 rpm --dbpath "$TMP_DIR" -Kv "$RPM_FILE"
+
+echo -e "==> Verifying signature for $RPM_FILE using client --verify ... :\n"
+../bin/client -v --verify --pub-key ${KEY_INPUT} ${RPM_FILE}
