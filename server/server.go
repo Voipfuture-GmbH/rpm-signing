@@ -21,6 +21,8 @@ import (
 	"github.com/ProtonMail/go-crypto/openpgp/packet"
 )
 
+const REQUEST_PARAM_AUTH_TOKEN = "authToken"
+
 type AppConfig struct {
 	Verbose               bool
 	DebugMode             bool
@@ -30,6 +32,7 @@ type AppConfig struct {
 	ApiSigningToken       string
 	ListenAddress         string
 	RpmSignClientBinary   string
+	AccessLogPath         string
 }
 
 // defaultListenAddress is used when the configuration file has no 'listen_address' key.
@@ -95,6 +98,15 @@ func loadAppConfigFromReader(reader io.ReadCloser) (AppConfig, error) {
 		return AppConfig{}, err
 	}
 
+	seenOpts := common.NewSet[string]()
+	failIfNotUnique := func(opt string) {
+		if seenOpts.Contains(opt) {
+			_, _ = fmt.Fprintf(os.Stderr, "Config file option %s most not appear more than once", opt)
+			os.Exit(1)
+		}
+		seenOpts.Add(opt)
+	}
+
 	var result AppConfig
 	for lineNo, line := range lines {
 
@@ -121,6 +133,7 @@ func loadAppConfigFromReader(reader io.ReadCloser) (AppConfig, error) {
 			return AppConfig{}, fmt.Errorf("config file has error on line %d: Malformed, needs to be <key>=<value>", lineNo+1)
 		}
 
+		failIfNotUnique(key)
 		switch key {
 		case "verbose":
 			result.Verbose, err = stringToBoolean(value)
@@ -142,6 +155,8 @@ func loadAppConfigFromReader(reader io.ReadCloser) (AppConfig, error) {
 			if err != nil {
 				return AppConfig{}, fmt.Errorf("config file has error on line %d: %w", lineNo+1, err)
 			}
+		case "access_log":
+			result.AccessLogPath = value
 		case "gpg_private_key_password":
 			result.GpgPrivateKeyPassword = []byte(value)
 		case "api_signing_token":
@@ -157,7 +172,7 @@ func loadAppConfigFromReader(reader io.ReadCloser) (AppConfig, error) {
 				}
 			}
 		default:
-			return AppConfig{}, fmt.Errorf("config file has error on line %d: Unrecognized key '%s", lineNo+1, key)
+			return AppConfig{}, fmt.Errorf("config file has error on line %d: Unrecognized key '%s'", lineNo+1, key)
 		}
 	}
 	if len(result.ApiSigningToken) == 0 {
@@ -269,21 +284,24 @@ func initBinaryUncacheableHttpResponse(w http.ResponseWriter) {
 	w.Header().Set("Expires", "0")
 }
 
+func sendHttpError(code int, msg string, w http.ResponseWriter) {
+	http.Error(w, msg, code)
+}
+
 // handlePublicKey serves GET /publickey and returns the application's GPG public key
 func handlePublicKey(w http.ResponseWriter, appConfig AppConfig) {
 
 	publicKey, err := appConfig.LoadGpgPublicKeyAsBytes()
 	if err != nil {
 		common.RootLogger().Errorf("Failed to load GPG public key %s: %v", appConfig.GpgPublicKeyPath, err)
-		http.Error(w, "failed to load GPG public key", http.StatusInternalServerError)
+		sendHttpError(http.StatusInternalServerError, "failed to load GPG public key", w)
 		return
 	}
 	initBinaryUncacheableHttpResponse(w)
 	_, err = w.Write(publicKey)
 	if err != nil {
 		common.RootLogger().Errorf("Failed to write request body to  %s: %v", w, err)
-		http.Error(w, "failed to read request body", http.StatusBadRequest)
-		return
+		sendHttpError(http.StatusBadRequest, "failed to read request body", w)
 	}
 }
 
@@ -307,17 +325,17 @@ func doSigDetached(input io.Reader, appConfig AppConfig) ([]byte, error) {
 func handleSignDetached(w http.ResponseWriter, r *http.Request, appConfig AppConfig) {
 
 	// constant-time comparison because the token is a shared secret
-	token := r.URL.Query().Get("authToken")
+	token := r.URL.Query().Get(REQUEST_PARAM_AUTH_TOKEN)
 	if subtle.ConstantTimeCompare([]byte(token), []byte(appConfig.ApiSigningToken)) != 1 {
 		common.RootLogger().Errorf("Rejected /sign request from %s: missing or wrong authToken", r.RemoteAddr)
-		http.Error(w, "missing or invalid authToken", http.StatusForbidden)
+		sendHttpError(http.StatusForbidden, "missing or invalid authToken", w)
 		return
 	}
 
 	signature, err := doSigDetached(r.Body, appConfig)
 	if err != nil {
 		common.RootLogger().Errorf("Failed to sign incoming generic data from %s: %v", r.RemoteAddr, err)
-		http.Error(w, "failed to sign data", http.StatusBadRequest)
+		sendHttpError(http.StatusBadRequest, "failed to sign data", w)
 		return
 	}
 
@@ -335,7 +353,7 @@ func handleSignRpmHeader(w http.ResponseWriter, r *http.Request, appConfig AppCo
 	token := r.URL.Query().Get("authToken")
 	if subtle.ConstantTimeCompare([]byte(token), []byte(appConfig.ApiSigningToken)) != 1 {
 		common.RootLogger().Errorf("Rejected /sign request from %s: missing or wrong authToken", r.RemoteAddr)
-		http.Error(w, "missing or invalid authToken", http.StatusForbidden)
+		sendHttpError(http.StatusForbidden, "missing or invalid authToken", w)
 		return
 	}
 
@@ -350,7 +368,7 @@ func handleSignRpmHeader(w http.ResponseWriter, r *http.Request, appConfig AppCo
 	if err != nil {
 		// the error is only logged, never returned, as it may disclose server-side file paths
 		common.RootLogger().Errorf("Failed to sign incoming RPM data from %s: %v", r.RemoteAddr, err)
-		http.Error(w, "failed to sign RPM data", http.StatusBadRequest)
+		sendHttpError(http.StatusBadRequest, "failed to sign RPM data", w)
 		return
 	}
 
@@ -358,6 +376,7 @@ func handleSignRpmHeader(w http.ResponseWriter, r *http.Request, appConfig AppCo
 	if _, err = w.Write(signedData.Bytes()); err != nil {
 		// too late for an error status, the response body is already being written
 		common.RootLogger().Errorf("Failed to write signed RPM data to %s: %v", r.RemoteAddr, err)
+		return
 	}
 }
 
@@ -367,7 +386,7 @@ func handleClientDownload(w http.ResponseWriter, r *http.Request, appConfig AppC
 
 	if len(appConfig.RpmSignClientBinary) == 0 {
 		common.RootLogger().Errorf("Rejected /clientDownload request from %s: no 'rpm_sign_client_binary' configured", r.RemoteAddr)
-		http.Error(w, "no client binary configured", http.StatusBadRequest)
+		sendHttpError(http.StatusBadRequest, "no client binary configured", w)
 		return
 	}
 
@@ -375,7 +394,7 @@ func handleClientDownload(w http.ResponseWriter, r *http.Request, appConfig AppC
 	if err != nil {
 		// the error is only logged, never returned, as it may disclose server-side file paths
 		common.RootLogger().Errorf("Failed to open client binary %s: %v", appConfig.RpmSignClientBinary, err)
-		http.Error(w, "failed to open client binary", http.StatusInternalServerError)
+		sendHttpError(http.StatusInternalServerError, "failed to open client binary", w)
 		return
 	}
 	defer common.CloseQuietly(file)
@@ -386,6 +405,86 @@ func handleClientDownload(w http.ResponseWriter, r *http.Request, appConfig AppC
 		// too late for an error status, the response body is already being written
 		common.RootLogger().Errorf("Failed to stream client binary to %s: %v", r.RemoteAddr, err)
 	}
+}
+
+var accessLog *os.File = nil
+var attemptedAccessLogOpen bool = false
+
+func writeAccessLog(logLine string, appConfig AppConfig) {
+
+	var err error
+	if accessLog == nil {
+
+		if len(appConfig.AccessLogPath) == 0 || attemptedAccessLogOpen {
+			common.RootLogger().Infof(logLine)
+			return
+		}
+		accessLog, err = os.Create(appConfig.AccessLogPath)
+		attemptedAccessLogOpen = true
+		if err != nil {
+			common.RootLogger().Errorf("Failed to open access log file %s: %v", appConfig.AccessLogPath, err)
+			return
+		}
+	}
+
+	_, err = accessLog.Write([]byte(logLine))
+	if err != nil {
+		common.RootLogger().Errorf("Failed to write to access log (no more access log will be written!) %s: %v", appConfig.AccessLogPath, err)
+		_ = accessLog.Close()
+		accessLog = nil
+	}
+}
+
+// responseWriterWrapper captures status code and bytes written
+type responseWriterWrapper struct {
+	http.ResponseWriter
+	statusCode   int
+	bytesWritten int
+}
+
+func (rw *responseWriterWrapper) WriteHeader(code int) {
+	rw.statusCode = code
+	rw.ResponseWriter.WriteHeader(code)
+}
+
+func (rw *responseWriterWrapper) Write(b []byte) (int, error) {
+	n, err := rw.ResponseWriter.Write(b)
+	rw.bytesWritten += n
+	return n, err
+}
+
+// AccessLogMiddleware formats logs using the Apache Combined Log Format
+func AccessLogMiddleware(next http.Handler, appConfig AppConfig) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		wrapper := &responseWriterWrapper{ResponseWriter: w, statusCode: http.StatusOK}
+
+		next.ServeHTTP(wrapper, r)
+
+		// Combined Log Format: client_ip - - [timestamp] "method path proto" status bytes "referer" "user_agent"
+		timestamp := start.Format("02/Jan/2006:15:04:05 -0700")
+		referer := r.Referer()
+		if referer == "" {
+			referer = "-"
+		}
+		userAgent := r.UserAgent()
+		if userAgent == "" {
+			userAgent = "-"
+		}
+
+		logLine := fmt.Sprintf("%s - - [%s] \"%s %s %s\" %d %d \"%s\" \"%s\"\n",
+			r.RemoteAddr,
+			timestamp,
+			r.Method,
+			r.URL.RequestURI(),
+			r.Proto,
+			wrapper.statusCode,
+			wrapper.bytesWritten,
+			referer,
+			userAgent,
+		)
+		writeAccessLog(logLine, appConfig)
+	})
 }
 
 // startHttpServer serves the signing API until the process receives SIGINT or SIGTERM
@@ -408,7 +507,7 @@ func startHttpServer(appConfig AppConfig) error {
 		handleClientDownload(w, r, appConfig)
 	})
 
-	server := &http.Server{Addr: appConfig.ListenAddress, Handler: mux}
+	server := &http.Server{Addr: appConfig.ListenAddress, Handler: AccessLogMiddleware(mux, appConfig)}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

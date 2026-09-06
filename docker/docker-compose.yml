@@ -25,6 +25,7 @@
 services:
   rpm-signing-server:
     image: rpm-signing:latest
+    container_name: rpm-signing-server
     build:
       # The context is the project root because the Dockerfile copies go.mod and
       # the source packages from there.

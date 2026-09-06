@@ -29,7 +29,7 @@ FINAL_NAME="${IMAGE_NAME}:${IMAGE_VERSION}"
 GIT_REF=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
 
 echo "Building $FINAL_NAME"
-( cd .. ; docker build -f docker/Dockerfile \
+( cd .. ; docker build --no-cache -f docker/Dockerfile \
     --build-arg APP_VERSION="${APP_VERSION}" \
     --build-arg GIT_REF="${GIT_REF}" \
     -t ${FINAL_NAME} . )
