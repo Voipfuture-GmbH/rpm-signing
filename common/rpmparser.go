@@ -1481,7 +1481,7 @@ func (f *RpmFile) Write(destination WriterWithOffset, payload ReaderWithOffset) 
 	RootLogger().Infof("Writing RPM payload at offset 0x%x", destination.Offset())
 	RootLogger().Infof("Reader ist at offset 0x%x", payload.Offset())
 	bytesCopied, err := io.Copy(destination, payload)
-	RootLogger().Infof("Copied %d bytes", bytesCopied)
+	RootLogger().Infof("Copied %d payload bytes", bytesCopied)
 	return err
 }
 
