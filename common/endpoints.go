@@ -12,13 +12,16 @@ const PubKeyDownloadEndpoint = "/publickey"
 // client binary
 const ClientDownloadEndpoint = "/clientDownload"
 
-// SignRpmHeader receives RPM header data and
+// SignRpmHeaderEndpoint receives RPM header data and
 // streams the signed RPM header back to the client
-const SignRpmHeader = "/signRpmHeader"
+const SignRpmHeaderEndpoint = "/signRpmHeader"
 
 // SignDetached receives arbitrary data and
 // returns an ASCII-armoreed GPG detached signature
 // of that data (suitable for signing RPM
 // repository metadata for example)
-// FIXME: Implement me
 const SignDetached = "/signDetached"
+
+// InfoEndpoint HTTP endpoint that returns a JSON
+// payload describing the server (uptime, version etc.)
+const InfoEndpoint = "/info"

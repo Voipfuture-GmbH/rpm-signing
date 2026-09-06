@@ -382,6 +382,23 @@ func handleSignRpmHeader(w http.ResponseWriter, r *http.Request, appConfig AppCo
 	}
 }
 
+var serverStartTime = time.Now()
+
+// handleVersionRequest serves GET /version and returns
+// a JSON response with the application version etc.
+func handleVersionRequest(w http.ResponseWriter, r *http.Request, appConfig AppConfig) {
+
+	serverStart := serverStartTime.Format(time.RFC3339)
+	json := `{ application: "rpm-signing", serverStart: "` + serverStart + `", version:"` + common.AppVersion + `", gitRef: "` + common.GitRef + `"}`
+
+	initBinaryUncacheableHttpResponse(w)
+	w.Header().Set("Content-Type", "application/json")
+	if _, err := w.Write([]byte(json)); err != nil {
+		// too late for an error status, the response body is already being written
+		common.RootLogger().Errorf("Failed to stream version JSON to %s: %v", r.RemoteAddr, err)
+	}
+}
+
 // handleClientDownload serves GET /clientDownload and streams the client binary
 // configured via 'rpm_sign_client_binary'. Returns 400 when that option is not set.
 func handleClientDownload(w http.ResponseWriter, r *http.Request, appConfig AppConfig) {
@@ -506,7 +523,7 @@ func startHttpServer(appConfig AppConfig) error {
 	mux.HandleFunc("GET "+common.PubKeyDownloadEndpoint, func(w http.ResponseWriter, r *http.Request) {
 		handlePublicKey(w, appConfig)
 	})
-	mux.HandleFunc("POST "+common.SignRpmHeader, func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST "+common.SignRpmHeaderEndpoint, func(w http.ResponseWriter, r *http.Request) {
 		handleSignRpmHeader(w, r, appConfig)
 	})
 	mux.HandleFunc("POST "+common.SignDetached, func(w http.ResponseWriter, r *http.Request) {
@@ -514,6 +531,9 @@ func startHttpServer(appConfig AppConfig) error {
 	})
 	mux.HandleFunc("GET "+common.ClientDownloadEndpoint, func(w http.ResponseWriter, r *http.Request) {
 		handleClientDownload(w, r, appConfig)
+	})
+	mux.HandleFunc("GET "+common.InfoEndpoint, func(w http.ResponseWriter, r *http.Request) {
+		handleVersionRequest(w, r, appConfig)
 	})
 
 	server := &http.Server{Addr: appConfig.ListenAddress, Handler: AccessLogMiddleware(mux, appConfig)}

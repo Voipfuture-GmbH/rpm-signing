@@ -16,6 +16,10 @@ This is currently very much the MVP and neither performance nor protection from 
 
 ### HTTP endpoint description
 
+* GET /info
+
+  Returns a short JSON response with information (uptime, software version etc.) about this server instance 
+
 * GET /publickey
 
   Returns an armored GPG keyring containing the GPG public keys of any signing keys the server is using/used to sign RPMs
