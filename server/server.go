@@ -472,11 +472,18 @@ func AccessLogMiddleware(next http.Handler, appConfig AppConfig) http.Handler {
 			userAgent = "-"
 		}
 
+		var uri string
+		if appConfig.DebugMode {
+			uri = r.URL.RequestURI()
+		} else {
+			uri = r.URL.Scheme + "://" + r.Host + r.URL.Path
+		}
+
 		logLine := fmt.Sprintf("%s - - [%s] \"%s %s %s\" %d %d \"%s\" \"%s\"\n",
 			r.RemoteAddr,
 			timestamp,
 			r.Method,
-			r.URL.RequestURI(),
+			uri,
 			r.Proto,
 			wrapper.statusCode,
 			wrapper.bytesWritten,
