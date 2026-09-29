@@ -23,6 +23,13 @@ import (
 
 const REQUEST_PARAM_AUTH_TOKEN = "authToken"
 
+type Architecture string
+
+const (
+	ARCH_X86   Architecture = "x86"
+	ARCH_ARM64 Architecture = "arm64"
+)
+
 type AppConfig struct {
 	Verbose               bool
 	DebugMode             bool
@@ -31,7 +38,7 @@ type AppConfig struct {
 	GpgPrivateKeyPassword []byte
 	ApiSigningToken       string
 	ListenAddress         string
-	RpmSignClientBinary   string
+	RpmSignClientBinary   map[Architecture]string
 	AccessLogPath         string
 }
 
@@ -108,6 +115,7 @@ func loadAppConfigFromReader(reader io.ReadCloser) (AppConfig, error) {
 	}
 
 	var result AppConfig
+	result.RpmSignClientBinary = make(map[Architecture]string)
 	for lineNo, line := range lines {
 
 		runes := []rune(line)
@@ -163,10 +171,18 @@ func loadAppConfigFromReader(reader io.ReadCloser) (AppConfig, error) {
 			result.ApiSigningToken = value
 		case "listen_address":
 			result.ListenAddress = value
+		case "rpm_sign_arm64_client_binary":
+			// optional, but a path that is given must point at an existing file
+			if len(value) > 0 {
+				result.RpmSignClientBinary[ARCH_ARM64], err = assertFileExists(value)
+				if err != nil {
+					return AppConfig{}, fmt.Errorf("config file has error on line %d: %w", lineNo+1, err)
+				}
+			}
 		case "rpm_sign_client_binary":
 			// optional, but a path that is given must point at an existing file
 			if len(value) > 0 {
-				result.RpmSignClientBinary, err = assertFileExists(value)
+				result.RpmSignClientBinary[ARCH_X86], err = assertFileExists(value)
 				if err != nil {
 					return AppConfig{}, fmt.Errorf("config file has error on line %d: %w", lineNo+1, err)
 				}
@@ -290,7 +306,7 @@ func sendHttpError(code int, msg string, w http.ResponseWriter) {
 	http.Error(w, msg, code)
 }
 
-// handlePublicKey serves GET /publickey and returns the application's GPG public key
+// handlePublicKey serves GET /publicKey and returns the application's GPG public key
 func handlePublicKey(w http.ResponseWriter, appConfig AppConfig) {
 
 	publicKey, err := appConfig.LoadGpgPublicKeyAsBytes()
@@ -410,7 +426,30 @@ func handleClientDownload(w http.ResponseWriter, r *http.Request, appConfig AppC
 		return
 	}
 
-	file, err := os.Open(appConfig.RpmSignClientBinary)
+	queryParams := r.URL.Query()
+
+	architecture := ARCH_X86
+	if queryParams.Has("arch") {
+		archValue := queryParams.Get("arch")
+		if strings.ToLower(archValue) == "x86" {
+			architecture = ARCH_X86
+		} else if strings.ToLower(archValue) == "arm64" {
+			architecture = ARCH_ARM64
+		} else {
+			common.RootLogger().Errorf("Rejected /clientDownload request from %s: Unsupported architecture '%v'", r.RemoteAddr, archValue)
+			sendHttpError(http.StatusBadRequest, "Unsupported architecture", w)
+			return
+		}
+	}
+
+	binaryPath, ok := appConfig.RpmSignClientBinary[architecture]
+	if !ok {
+		common.RootLogger().Errorf("Rejected /clientDownload request from %s with architecture '%v' - no binary configured for that architecture", r.RemoteAddr, architecture)
+		sendHttpError(http.StatusBadRequest, "no client binary configured", w)
+		return
+	}
+
+	file, err := os.Open(binaryPath)
 	if err != nil {
 		// the error is only logged, never returned, as it may disclose server-side file paths
 		common.RootLogger().Errorf("Failed to open client binary %s: %v", appConfig.RpmSignClientBinary, err)
@@ -420,7 +459,7 @@ func handleClientDownload(w http.ResponseWriter, r *http.Request, appConfig AppC
 	defer common.CloseQuietly(file)
 
 	initBinaryUncacheableHttpResponse(w)
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filepath.Base(appConfig.RpmSignClientBinary)))
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filepath.Base(binaryPath)))
 	if _, err = io.Copy(w, file); err != nil {
 		// too late for an error status, the response body is already being written
 		common.RootLogger().Errorf("Failed to stream client binary to %s: %v", r.RemoteAddr, err)

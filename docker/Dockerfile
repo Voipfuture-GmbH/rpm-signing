@@ -32,6 +32,10 @@ RUN CGO_ENABLED=0 go build -trimpath \
     -ldflags "-X rpm-signing/common.AppVersion=${APP_VERSION} -X rpm-signing/common.GitRef=${GIT_REF}" \
     -o /out/client ./client
 
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath \
+    -ldflags "-X rpm-signing/common.AppVersion=${APP_VERSION} -X rpm-signing/common.GitRef=${GIT_REF}" \
+    -o /out/client_arm64 ./client
+
 # Final stage: the two binaries only, no toolchain or sources.
 FROM alpine:3.21
 
@@ -39,6 +43,7 @@ COPY --from=build /out/server /usr/local/bin/server
 # The client is shipped so the server can hand it out via GET /clientDownload;
 # point 'rpm_sign_client_binary' at this path in the mounted configuration file.
 COPY --from=build /out/client /usr/local/bin/client
+COPY --from=build /out/client_arm64 /usr/local/bin/client_arm64
 
 # Default listen address of the server; informational only.
 EXPOSE 8080

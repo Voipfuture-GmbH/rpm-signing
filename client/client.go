@@ -357,6 +357,13 @@ func main() {
 				common.RootLogger().Infof("Sending %d bytes of RPM header to sign server %s", len(headerCapture.Bytes()), signServerUrl)
 			}
 
+			if common.IsEmpty(signServerToken) {
+				signServerToken = os.Getenv("RPM_SIGNING_AUTH_TOKEN")
+				if verboseOutput && common.IsNotEmpty(signServerToken) {
+					common.RootLogger().Infof("Using non-blank auth token from RPM_SIGNING_AUTH_TOKEN environment variable")
+				}
+			}
+
 			if err = signRpmRemotely(signServerUrl, signServerToken, headerCapture.Bytes(), rpmFileReader,
 				destinationFileName, overwriteDestinationFile); err != nil {
 				printErrorAndExit(fmt.Sprintf("Failed to sign RPM file %s. Error: %v", destinationFileName, err))

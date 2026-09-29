@@ -20,13 +20,13 @@ This is currently very much the MVP and neither performance nor protection from 
 
   Returns a short JSON response with information (uptime, software version etc.) about this server instance 
 
-* GET /publickey
+* GET /publicKey
 
-  Returns an armored GPG keyring containing the GPG public keys of any signing keys the server is using/used to sign RPMs
+  Returns an armored GPG keyring containing the GPG public keys of any signing keys the server is using/used to sign RPMs.
   
 * GET /clientDownload
 
-  Returns the server's version of the client binary. Will return HTTP Bad Request if the server did not get configured to return the client.
+  Returns the server's version of the client binary. Will return HTTP Bad Request if the server did not get configured to return the client. An optional 'arch' parameter with supported values 'x64' and 'arm64' may be passed.
   
 * POST /signRpmHeader?authToken=<....token....>
 
@@ -57,7 +57,7 @@ Since both server and client share the same code, the client can sign RPMs on it
 | `--sign-server` | Base URL of a signing server | `--sign-server http://signer:8080` | Signs the RPM remotely: the header (everything up to the payload) is POSTed to `<base url>/signRpmHeader` and the response is merged with the local payload into the output file. Only valid together with `-s`/`--sign`, and mutually exclusive with `--priv-key` and `--priv-key-password`. |
 | `-s`, `--sign-rpm` | *(flag, no value)* | `--sign` | Signs the RPM and writes the result to the output file. Requires `--sign-server` / `--priv-key` and `-o`/`--output-file`. |
 | `--sign-generic` | *(flag, no value)* | `--sign-generic` | Creates an ASCII-armored, detached GPG signature over the whole input file and writes it to the output file. Requires `--priv-key` / `--sign-server` and `-o`/`--output-file`. |
-| `--sign-server-token` | Authentication token | `--sign-server-token "s3cret"` | Value sent as the `authToken` query parameter to the signing server. Optional; when omitted an empty `authToken` is sent. Using it without `--sign-server` is an error. |
+| `--sign-server-token` | Authentication token | `--sign-server-token "s3cret"` | Value sent as the `authToken` query parameter to the signing server. Optional; when omitted the value of the environment variable RPM_SIGNING_AUTH_TOKEN will be used. If that one is undefined/blank, an empty `authToken` is sent. Using it without `--sign-server` is an error. |
 | `-f`, `--overwrite` | *(flag, no value)* | `--overwrite` | Allows the output file given via `-o`/`--output-file` to be overwritten if it already exists. |
 | `-o`, `--output-file` | Path to the RPM file to write | `-o /tmp/signed.rpm` | Destination file for the signed RPM. Mandatory when `--sign` is used. |
 | `--priv-key` | Path to a GPG private key file | `--priv-key ~/.gnupg/signing.asc` | GPG private key used for signing. Mandatory when `--sign` is used. |

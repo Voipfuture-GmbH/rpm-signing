@@ -1,9 +1,10 @@
 # Makefile for Client-Server Golang Project
 
-.PHONY: all build client server fmt vet clean test
+.PHONY: all build client client_arm64 server fmt vet clean test
 
 # Output binaries
 CLIENT_BIN := bin/client
+CLIENT_ARM64_BIN := bin/client_arm64
 SERVER_BIN := bin/server
 
 # Point directly to package paths
@@ -26,14 +27,19 @@ all: fmt vet build test
 all-stripped: fmt vet build test
 
 # Build both client and server
-build: client server
+build: client client_arm64 server
 
-build-stripped: client server
+build-stripped: client client_arm64 server
 
 # Build client binary
 client:
 	@mkdir -p bin
 	go build -ldflags "$(LDFLAGS)" -o $(CLIENT_BIN) $(CLIENT_PKG)
+
+# Build client arm64 binary
+client_arm64:
+	@mkdir -p bin
+	GOOS=linux GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o $(CLIENT_ARM64_BIN) $(CLIENT_PKG)
 
 # Build server binary
 server:

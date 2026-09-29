@@ -6,7 +6,7 @@ package common
 // PubKeyDownloadEndpoint is a server endpoint
 // that returns ASCII-armored GPG public keys
 // to verify signatures made by this server
-const PubKeyDownloadEndpoint = "/publickey"
+const PubKeyDownloadEndpoint = "/publicKey"
 
 // ClientDownloadEndpoint returns the RPM
 // client binary

@@ -277,6 +277,14 @@ func FillBuffer(buf []byte, reader io.Reader) error {
 	return nil
 }
 
+func IsNotEmpty(s string) bool {
+	return len(strings.TrimSpace(s)) != 0
+}
+
+func IsEmpty(s string) bool {
+	return len(strings.TrimSpace(s)) == 0
+}
+
 func RightPad(s string, padChar string, totalLength int) string {
 	// Use RuneCountInString so multibyte UTF-8 characters are measured accurately
 	charCount := utf8.RuneCountInString(s)
