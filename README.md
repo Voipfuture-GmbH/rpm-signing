@@ -26,7 +26,7 @@ This is currently very much the MVP and neither performance nor protection from 
   
 * GET /clientDownload
 
-  Returns the server's version of the client binary. Will return HTTP Bad Request if the server did not get configured to return the client. An optional 'arch' parameter with supported values 'x64' and 'arm64' may be passed.
+  Returns the server's version of the client binary. Will return HTTP Bad Request if the server did not get configured to return the client. An optional 'arch' parameter with supported values 'x64' and 'arm64' may be passed. Passing "arm64" currently builds for MacOS on ARM64 (so NO support for Linux on ARM64 yet).
   
 * POST /signRpmHeader?authToken=<....token....>
 

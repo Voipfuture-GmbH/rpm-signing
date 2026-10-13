@@ -4,7 +4,7 @@
 
 # Output binaries
 CLIENT_BIN := bin/client
-CLIENT_ARM64_BIN := bin/client_arm64
+CLIENT_DARWIN_ARM64_BIN := bin/client_arm64
 SERVER_BIN := bin/server
 
 # Point directly to package paths
@@ -36,10 +36,10 @@ client:
 	@mkdir -p bin
 	go build -ldflags "$(LDFLAGS)" -o $(CLIENT_BIN) $(CLIENT_PKG)
 
-# Build client arm64 binary
+# Build client darwin arm64 binary
 client_arm64:
 	@mkdir -p bin
-	GOOS=linux GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o $(CLIENT_ARM64_BIN) $(CLIENT_PKG)
+	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o $(CLIENT_DARWIN_ARM64_BIN) $(CLIENT_PKG)
 
 # Build server binary
 server:
