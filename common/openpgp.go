@@ -211,13 +211,14 @@ func SignDigest(digest hash.Hash, privKey *packet.PrivateKey) ([]byte, error) {
 
 	config := &packet.Config{
 		Time: time.Now,
+		InsecureGenerateNonCriticalSignatureCreationTime: true,
 	}
 
 	// 3. Create the Signature packet explicitly
 	sig := CreateSignaturePacket(privKey, config)
 
 	// 3. Sign the populated hash instance
-	err := sig.Sign(digest, privKey, nil)
+	err := sig.Sign(digest, privKey, config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign header: %w", err)
 	}
@@ -260,6 +261,7 @@ func SignGeneric(dataToSign io.Reader, privKey *packet.PrivateKey) ([]byte, erro
 
 	config := &packet.Config{
 		Time: time.Now,
+		InsecureGenerateNonCriticalSignatureCreationTime: true,
 	}
 
 	// 3. Create the Signature packet explicitly
